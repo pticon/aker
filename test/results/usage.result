@@ -1,0 +1,7 @@
+usage: aker [options]
+options:
+	-c <conffile> : default is /usr/local/etc/aker.conf
+	-f            : run in foreground (do not fork)
+	-h            : display this and exit
+	-t            : test the generated pcap filter and exit
+	-v            : display version number and exit

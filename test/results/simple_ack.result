@@ -1,0 +1,2 @@
+Ethernet interface detected
+((dst host 192.168.100.10) and (tcp dst port 1 or tcp dst port 2 or tcp dst port 3 or tcp dst port 4 or tcp dst port 5) and tcp[tcpflags] & tcp-ack != 0)
