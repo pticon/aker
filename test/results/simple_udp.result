@@ -1,0 +1,2 @@
+Ethernet interface detected
+((dst host 192.168.100.10) and (udp dst port 1 or udp dst port 2 or udp dst port 3 or udp dst port 4 or udp dst port 5))

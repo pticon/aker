@@ -42,6 +42,7 @@
 #include <netinet/if_ether.h>
 #include <netinet/ip.h>
 #include <netinet/tcp.h>
+#include <netinet/udp.h>
 #include <time.h>
 
 #include "list.h"
@@ -62,6 +63,7 @@
 #define FLAG_ACK	(1 << 3)
 #define FLAG_PSH	(1 << 4)
 #define FLAG_URG	(1 << 5)
+#define FLAG_UDP	(1 << 6)
 
 /* The port knocking sequence itself
  */
@@ -249,6 +251,48 @@ static struct try *try_find_by_ip(unsigned ip)
 	return NULL;
 }
 
+static int parse_sequence(struct door *d, char *value)
+{
+	char	*ptr;
+
+	while ( (ptr = strsep(&value, ",")) )
+	{
+		if ( d->seqcount >= SEQUENCE_MAX )
+			return -1;
+
+		d->seq [d->seqcount++] = atoi(ptr);
+	}
+
+	return 0;
+}
+
+static int parse_flags(struct door *d, char *value)
+{
+	char	*ptr;
+
+	while ( (ptr = strsep(&value, ",")) )
+	{
+		if ( strcasecmp(ptr, "syn") == 0 )
+			d->flags |= FLAG_SYN;
+		else if ( strcasecmp(ptr, "rst") == 0 )
+			d->flags |= FLAG_RST;
+		else if ( strcasecmp(ptr, "fin") == 0 )
+			d->flags |= FLAG_FIN;
+		else if ( strcasecmp(ptr, "ack") == 0 )
+			d->flags |= FLAG_ACK;
+		else if ( strcasecmp(ptr, "psh") == 0 )
+			d->flags |= FLAG_PSH;
+		else if ( strcasecmp(ptr, "urg") == 0 )
+			d->flags |= FLAG_URG;
+		else if ( strcasecmp(ptr, "udp") == 0 )
+			d->flags |= FLAG_UDP;
+		else
+			return -1;
+	}
+
+	return 0;
+}
+
 static int parse_conf(const char *conffile)
 {
 	FILE		*f;
@@ -371,15 +415,11 @@ static int parse_conf(const char *conffile)
 		}
 		else if ( strcasecmp(key, "sequence") == 0 )
 		{
-			while ( (ptr = strsep(&value, ",")) )
+			if ( parse_sequence(d, value) )
 			{
-				if ( d->seqcount >= SEQUENCE_MAX )
-				{
-					fprintf(stderr, "%s:%d: too many sequences\n",
-						conffile, line);
-					goto error;
-				}
-				d->seq [d->seqcount++] = atoi(ptr);
+				fprintf(stderr, "%s:%d: too many sequences\n",
+					conffile, line);
+				goto error;
 			}
 		}
 		else if ( strcasecmp(key, "timeout") == 0 )
@@ -388,26 +428,11 @@ static int parse_conf(const char *conffile)
 		}
 		else if ( strcasecmp(key, "flags") == 0 )
 		{
-			while ( (ptr = strsep(&value, ",")) )
+			if ( parse_flags(d, value) )
 			{
-				if ( strcasecmp(ptr, "syn") == 0 )
-					d->flags |= FLAG_SYN;
-				else if ( strcasecmp(ptr, "rst") == 0 )
-					d->flags |= FLAG_RST;
-				else if ( strcasecmp(ptr, "fin") == 0 )
-					d->flags |= FLAG_FIN;
-				else if ( strcasecmp(ptr, "ack") == 0 )
-					d->flags |= FLAG_ACK;
-				else if ( strcasecmp(ptr, "psh") == 0 )
-					d->flags |= FLAG_PSH;
-				else if ( strcasecmp(ptr, "urg") == 0 )
-					d->flags |= FLAG_URG;
-				else
-				{
-					fprintf(stderr, "%s:%d: unknown flag\n",
-						conffile, line);
-					goto error;
-				}
+				fprintf(stderr, "%s:%d: unknown flag\n",
+					conffile, line);
+				goto error;
 			}
 		}
 		else
@@ -465,7 +490,10 @@ static int gen_pcap_filter(void)
 				if ( set++ )
 					strncat(d->pcap_exp, " or ", sizeof(d->pcap_exp));
 
-				strncat(d->pcap_exp, "tcp dst port ", sizeof(d->pcap_exp));
+				if ( (d->flags & FLAG_UDP) != 0 )
+					strncat(d->pcap_exp, "udp dst port ", sizeof(d->pcap_exp));
+				else
+					strncat(d->pcap_exp, "tcp dst port ", sizeof(d->pcap_exp));
 
 				snprintf(buf, sizeof(buf), "%d", d->seq[i]);
 				strncat(d->pcap_exp, buf, sizeof(d->pcap_exp));
@@ -631,7 +659,8 @@ static int sanity_ip(const struct ip *ip, int *len)
 	if ( ip->ip_v != 4 )
 		return 0;
 
-	if ( ip->ip_p != IPPROTO_TCP )
+	if ( ip->ip_p != IPPROTO_TCP &&
+		ip->ip_p != IPPROTO_UDP )
 		return 0;
 
 	if ( *len < ip->ip_hl * 4 )
@@ -639,7 +668,7 @@ static int sanity_ip(const struct ip *ip, int *len)
 
 	*len -= ip->ip_hl * 4;
 
-	return 1;
+	return ip->ip_p;
 }
 
 
@@ -660,6 +689,14 @@ static int sanity_loopback(const uint32_t *loopback, int *len)
 static int sanity_tcp(const struct tcphdr *tcp, int *len)
 {
 	if ( *len < sizeof(*tcp) )
+		return 0;
+
+	return 1;
+}
+
+static int sanity_udp(const struct udphdr *udp, int *len)
+{
+	if ( *len < sizeof(*udp) )
 		return 0;
 
 	return 1;
@@ -689,9 +726,11 @@ static unsigned get_tcp_flags(const struct tcphdr *tcp)
 }
 
 #ifdef __FreeBSD__
-# define TCP_DEST_PORT(_tcp)	ntohs(tcp->th_dport)
+# define TCP_DEST_PORT(_tcp)	ntohs(_tcp->th_dport)
+# define UDP_DEST_PORT(_udp)	ntohs(_udp->uh_dport)
 #else
-# define TCP_DEST_PORT(_tcp)	ntohs(tcp->dest)
+# define TCP_DEST_PORT(_tcp)	ntohs(_tcp->dest)
+# define UDP_DEST_PORT(_udp)	ntohs(_udp->dest)
 #endif /* __FreeBSD__ */
 
 static void sniff(u_char *user, const struct pcap_pkthdr *hdr, const u_char *bytes)
@@ -699,7 +738,8 @@ static void sniff(u_char *user, const struct pcap_pkthdr *hdr, const u_char *byt
 	int				len = hdr->caplen;
 	const struct ether_header	*eth;
 	const struct ip			*ip;
-	const struct tcphdr		*tcp;
+	const struct tcphdr		*tcp = NULL;
+	const struct udphdr		*udp = NULL;
 	struct try			*t,
 					*ttmp;
 	unsigned			srcip;
@@ -729,13 +769,24 @@ static void sniff(u_char *user, const struct pcap_pkthdr *hdr, const u_char *byt
 		return;
 	}
 
-	if ( !sanity_ip(ip, &len) )
-		return;
+	switch ( sanity_ip(ip, &len) )
+	{
+		case IPPROTO_UDP:
+		udp = (const struct udphdr *) ((const u_char *)ip + (ip->ip_hl*4));
+		if ( !sanity_udp(udp, &len) )
+			return;
+		break;
 
-	tcp = (const struct tcphdr *) ((const u_char *)ip + (ip->ip_hl*4));
+		case IPPROTO_TCP:
+		tcp = (const struct tcphdr *) ((const u_char *)ip + (ip->ip_hl*4));
+		if ( !sanity_tcp(tcp, &len) )
+			return;
+		break;
 
-	if ( !sanity_tcp(tcp, &len) )
+		default:
 		return;
+	}
+
 
 	/* Cleanup the tries
 	 */
@@ -753,7 +804,7 @@ static void sniff(u_char *user, const struct pcap_pkthdr *hdr, const u_char *byt
 	/* Extract infos
 	 */
 	srcip = ip->ip_src.s_addr;
-	flags = get_tcp_flags(tcp);
+	flags = tcp ? get_tcp_flags(tcp) : FLAG_UDP;
 
 	/* Find back the try or allocate a new one
 	 */
@@ -762,7 +813,9 @@ static void sniff(u_char *user, const struct pcap_pkthdr *hdr, const u_char *byt
 		int	found = 0;
 
 		list_for_each_entry(d, &doors, list)
-			if ( d->seq [0] == TCP_DEST_PORT(tcp) && d->flags == flags )
+			if ( d->flags == flags &&
+				( (tcp && d->seq [0] == TCP_DEST_PORT(tcp)) ||
+					(udp && d->seq [0] == UDP_DEST_PORT(udp))))
 			{
 				found++;
 				break;
@@ -780,7 +833,8 @@ static void sniff(u_char *user, const struct pcap_pkthdr *hdr, const u_char *byt
 
 	/* Update the entry on success and execute it if the sequence is completed
 	 */
-	if ( t->d->seq [t->seqcount] != TCP_DEST_PORT(tcp) ||
+	if ( (tcp && t->d->seq [t->seqcount] != TCP_DEST_PORT(tcp)) ||
+		(udp && t->d->seq [t->seqcount] != UDP_DEST_PORT(udp)) ||
 		t->d->flags != flags )
 		return;
 
@@ -789,6 +843,26 @@ static void sniff(u_char *user, const struct pcap_pkthdr *hdr, const u_char *byt
 		exec_door(t->d, ntohl(srcip));
 		try_free(t);
 	}
+}
+
+static int sanity_check(void)
+{
+	struct door		*d;
+
+	list_for_each_entry(d, &doors, list)
+	{
+		/* UDP and TCP is invalid
+		 */
+		if ( (d->flags & FLAG_UDP) != 0 &&
+			(d->flags & ~FLAG_UDP) != 0 )
+		{
+			fprintf(stderr, "Section %s cannot be TCP and UDP.\n",
+					d->name);
+			return -1;
+		}
+	}
+
+	return 0;
 }
 
 int main(int argc, char *argv[])
@@ -840,6 +914,11 @@ reload:
 	/* Parse config file
 	 */
 	if ( (ret = parse_conf(conffile)) )
+		goto error;
+
+	/* Sanity check
+	 */
+	if ( (ret = sanity_check()) )
 		goto error;
 
 	/* Open the log file

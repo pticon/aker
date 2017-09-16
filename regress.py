@@ -75,6 +75,7 @@ config_tests.append(["simple_ack",             "-t",           "simple_ack.conf"
 config_tests.append(["simple_psh",             "-t",           "simple_psh.conf",              "simple_psh.result"])
 config_tests.append(["simple_urg",             "-t",           "simple_urg.conf",              "simple_urg.result"])
 config_tests.append(["multiple_targets",       "-t",           "multiple_targets.conf",        "multiple_targets.result"])
+config_tests.append(["simple_udp",             "-t",           "simple_udp.conf",              "simple_udp.result"])
 
 # define the live tests list
 live_tests = []
@@ -88,6 +89,7 @@ live_tests.append(["live_syn",			"",		"live_syn.conf",		"live_syn.result",	"127.
 live_tests.append(["live_ack",			"",		"live_ack.conf",		"live_ack.result",	"127.0.0.1",	"1,2,3,4,5",	"A",	"/tmp/live_ack"])
 live_tests.append(["live_fin",			"",		"live_fin.conf",		"live_fin.result",	"127.0.0.1",	"1,2,3,4,5",	"F",	"/tmp/live_fin"])
 live_tests.append(["live_rst",			"",		"live_rst.conf",		"live_rst.result",	"127.0.0.1",	"1,2,3,4,5",	"R",	"/tmp/live_rst"])
+live_tests.append(["live_udp",			"",		"live_udp.conf",		"live_udp.result",	"127.0.0.1",	"1,2,3,4,5",	"UDP",	"/tmp/live_udp"])
 
 # define the signal tests list
 signal_tests = []
@@ -192,7 +194,10 @@ def exec_live_test(testname):
 
 	for port in t[SEQUENCE].split(","):
 		srcport = RandShort()
-		synpkt = sr1(IP(dst=t[TARGET])/TCP(sport=int(srcport), dport=int(port), flags=str(t[FLAGS])), timeout=0.1, verbose=False)
+                if str(t[FLAGS]) == "UDP":
+		    synpkt = sr1(IP(dst=t[TARGET])/UDP(sport=int(srcport), dport=int(port)), timeout=0.1, verbose=False)
+                else:
+		    synpkt = sr1(IP(dst=t[TARGET])/TCP(sport=int(srcport), dport=int(port), flags=str(t[FLAGS])), timeout=0.1, verbose=False)
 
 	# Clean
 	pid = int(open("/tmp/aker.pid").read())
