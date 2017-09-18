@@ -44,6 +44,8 @@
 #include <netinet/tcp.h>
 #include <netinet/udp.h>
 #include <time.h>
+#include <errno.h>
+#include <limits.h>
 
 #include "list.h"
 
@@ -55,7 +57,7 @@
 #define DEFAULT_CONF	"/usr/local/etc/aker.conf"
 #define SEQUENCE_MAX	32
 #define DEFAULT_TIMEOUT	5
-#define PCAP_EXP_LEN	256
+#define PCAP_EXP_LEN	(SEQUENCE_MAX * 100)
 
 #define FLAG_SYN	(1 << 0)
 #define FLAG_RST	(1 << 1)
@@ -65,13 +67,19 @@
 #define FLAG_URG	(1 << 5)
 #define FLAG_UDP	(1 << 6)
 
+struct sequence
+{
+	unsigned short		port;
+	unsigned		flags;
+};
+
 /* The port knocking sequence itself
  */
 struct door
 {
 	char			name [PATH_MAX];
 	char			cmd [PATH_MAX];
-	unsigned short		seq [SEQUENCE_MAX];
+	struct sequence		seq [SEQUENCE_MAX];
 	unsigned		seqcount;
 	unsigned		flags;
 	time_t			timeout;
@@ -251,43 +259,73 @@ static struct try *try_find_by_ip(unsigned ip)
 	return NULL;
 }
 
-static int parse_sequence(struct door *d, char *value)
-{
-	char	*ptr;
-
-	while ( (ptr = strsep(&value, ",")) )
-	{
-		if ( d->seqcount >= SEQUENCE_MAX )
-			return -1;
-
-		d->seq [d->seqcount++] = atoi(ptr);
-	}
-
-	return 0;
-}
-
-static int parse_flags(struct door *d, char *value)
+static int parse_flags(unsigned *flags, char *value)
 {
 	char	*ptr;
 
 	while ( (ptr = strsep(&value, ",")) )
 	{
 		if ( strcasecmp(ptr, "syn") == 0 )
-			d->flags |= FLAG_SYN;
+			*flags |= FLAG_SYN;
 		else if ( strcasecmp(ptr, "rst") == 0 )
-			d->flags |= FLAG_RST;
+			*flags |= FLAG_RST;
 		else if ( strcasecmp(ptr, "fin") == 0 )
-			d->flags |= FLAG_FIN;
+			*flags |= FLAG_FIN;
 		else if ( strcasecmp(ptr, "ack") == 0 )
-			d->flags |= FLAG_ACK;
+			*flags |= FLAG_ACK;
 		else if ( strcasecmp(ptr, "psh") == 0 )
-			d->flags |= FLAG_PSH;
+			*flags |= FLAG_PSH;
 		else if ( strcasecmp(ptr, "urg") == 0 )
-			d->flags |= FLAG_URG;
+			*flags |= FLAG_URG;
 		else if ( strcasecmp(ptr, "udp") == 0 )
-			d->flags |= FLAG_UDP;
+			*flags |= FLAG_UDP;
 		else
 			return -1;
+	}
+
+	return 0;
+}
+
+static int parse_sequence(struct door *d, char *value)
+{
+	struct sequence	*sequence;
+	char		*ptr;
+	char		*endptr;
+	long		val;
+
+	while ( (ptr = strsep(&value, ",")) )
+	{
+		if ( d->seqcount >= SEQUENCE_MAX )
+			return -1;
+
+		sequence = &d->seq [d->seqcount++];
+
+		errno = 0;
+		val = strtol(ptr, &endptr, 10);
+
+		if ( endptr == ptr )
+			return -2;
+
+		if ( (errno == ERANGE && (val == LONG_MAX || val == LONG_MIN)) ||
+			(errno != 0 && val == 0) ||
+			(errno == 0 && (val <= 0 || val >= 0xffff)) )
+			return -3;
+
+		sequence->port = val;
+		sequence->flags = 0;
+
+		if ( *endptr == '\0' )
+			continue;
+
+		/* Parse the flags within the port number.
+		 * Valid syntax : "1234:syn/ack"
+		 */
+		if ( *endptr++ != ':' )
+			return -2;
+
+		while ( (ptr = strsep(&endptr, "/")) )
+			if ( parse_flags(&sequence->flags, ptr) )
+				return -4;
 	}
 
 	return 0;
@@ -415,10 +453,33 @@ static int parse_conf(const char *conffile)
 		}
 		else if ( strcasecmp(key, "sequence") == 0 )
 		{
-			if ( parse_sequence(d, value) )
+			switch ( parse_sequence(d, value) )
 			{
+				case 0:
+				break;
+
+				case -1:
 				fprintf(stderr, "%s:%d: too many sequences\n",
 					conffile, line);
+				goto error;
+
+				case -2:
+				fprintf(stderr, "%s:%d: no port number found\n",
+					conffile, line);
+				goto error;
+
+				case -3:
+				fprintf(stderr, "%s:%d: invalid port number\n",
+					conffile, line);
+				goto error;
+
+				case -4:
+				fprintf(stderr, "%s:%d: invalid flags\n",
+					conffile, line);
+				/* FALLTHROUGH
+				 */
+
+				default:
 				goto error;
 			}
 		}
@@ -428,7 +489,7 @@ static int parse_conf(const char *conffile)
 		}
 		else if ( strcasecmp(key, "flags") == 0 )
 		{
-			if ( parse_flags(d, value) )
+			if ( parse_flags(&d->flags, value) )
 			{
 				fprintf(stderr, "%s:%d: unknown flag\n",
 					conffile, line);
@@ -453,6 +514,39 @@ error:
 	return ret;
 }
 
+static int flags_are_global(const struct door *d)
+{
+	int			i;
+
+	for ( i = 0 ; i < d->seqcount ; i++ )
+		if ( d->seq[i].flags != 0 &&
+			d->seq[i].flags != d->flags )
+			return 0;
+
+	return 1;
+}
+
+static void flagsncat(const unsigned flags, char *buf, size_t n)
+{
+	if ( flags & FLAG_SYN )
+		strncat(buf, " and tcp[tcpflags] & tcp-syn != 0", n);
+
+	if ( flags & FLAG_RST )
+		strncat(buf, " and tcp[tcpflags] & tcp-rst != 0", n);
+
+	if ( flags & FLAG_FIN )
+		strncat(buf, " and tcp[tcpflags] & tcp-fin != 0", n);
+
+	if ( flags & FLAG_ACK )
+		strncat(buf, " and tcp[tcpflags] & tcp-ack != 0", n);
+
+	if ( flags & FLAG_PSH )
+		strncat(buf, " and tcp[tcpflags] & tcp-push != 0", n);
+
+	if ( flags & FLAG_URG )
+		strncat(buf, " and tcp[tcpflags] & tcp-urg != 0", n);
+}
+
 static int gen_pcap_filter(void)
 {
 	struct door		*d;
@@ -461,11 +555,13 @@ static int gen_pcap_filter(void)
 	char			filter [PATH_MAX];
 	struct bpf_program	bpf;
 	int			prev;
+	unsigned		flags;
 
 	/* Generate a subfilter for each door
 	 */
 	list_for_each_entry(d, &doors, list)
 	{
+		int	global_flags = flags_are_global(d);
 		int	prev = 0;
 
 		strncat(d->pcap_exp, "(", sizeof(d->pcap_exp));
@@ -490,13 +586,25 @@ static int gen_pcap_filter(void)
 				if ( set++ )
 					strncat(d->pcap_exp, " or ", sizeof(d->pcap_exp));
 
-				if ( (d->flags & FLAG_UDP) != 0 )
+				flags = d->seq[i].flags != 0 ? d->seq[i].flags : d->flags;
+
+				if ( (flags & ~FLAG_UDP) && !global_flags )
+					strncat(d->pcap_exp, "( ", sizeof(d->pcap_exp));
+
+
+				if ( (flags & FLAG_UDP) != 0 )
 					strncat(d->pcap_exp, "udp dst port ", sizeof(d->pcap_exp));
 				else
 					strncat(d->pcap_exp, "tcp dst port ", sizeof(d->pcap_exp));
 
-				snprintf(buf, sizeof(buf), "%d", d->seq[i]);
+				snprintf(buf, sizeof(buf), "%d", d->seq[i].port);
 				strncat(d->pcap_exp, buf, sizeof(d->pcap_exp));
+
+				if ( (flags & ~FLAG_UDP) && !global_flags )
+				{
+					flagsncat(flags, d->pcap_exp, sizeof(d->pcap_exp));
+					strncat(d->pcap_exp, " )", sizeof(d->pcap_exp));
+				}
 			}
 
 			if ( prev )
@@ -505,36 +613,8 @@ static int gen_pcap_filter(void)
 			prev = 1;
 		}
 
-		if ( d->flags & FLAG_SYN )
-		{
-			strncat(d->pcap_exp, " and tcp[tcpflags] & tcp-syn != 0",
-				sizeof(d->pcap_exp));
-		}
-		if ( d->flags & FLAG_RST )
-		{
-			strncat(d->pcap_exp, " and tcp[tcpflags] & tcp-rst != 0",
-				sizeof(d->pcap_exp));
-		}
-		if ( d->flags & FLAG_FIN )
-		{
-			strncat(d->pcap_exp, " and tcp[tcpflags] & tcp-fin != 0",
-				sizeof(d->pcap_exp));
-		}
-		if ( d->flags & FLAG_ACK )
-		{
-			strncat(d->pcap_exp, " and tcp[tcpflags] & tcp-ack != 0",
-				sizeof(d->pcap_exp));
-		}
-		if ( d->flags & FLAG_PSH )
-		{
-			strncat(d->pcap_exp, " and tcp[tcpflags] & tcp-push != 0",
-				sizeof(d->pcap_exp));
-		}
-		if ( d->flags & FLAG_URG )
-		{
-			strncat(d->pcap_exp, " and tcp[tcpflags] & tcp-urg != 0",
-				sizeof(d->pcap_exp));
-		}
+		if ( global_flags )
+			flagsncat(d->flags, d->pcap_exp, sizeof(d->pcap_exp));
 
 		strncat(d->pcap_exp, ")", sizeof(d->pcap_exp));
 	}
@@ -746,6 +826,7 @@ static void sniff(u_char *user, const struct pcap_pkthdr *hdr, const u_char *byt
 	struct door			*d;
 	unsigned			flags;
 	const uint32_t			*loopback;
+	unsigned			dflags;
 
 	/* Check the first layers
 	 */
@@ -813,13 +894,18 @@ static void sniff(u_char *user, const struct pcap_pkthdr *hdr, const u_char *byt
 		int	found = 0;
 
 		list_for_each_entry(d, &doors, list)
-			if ( d->flags == flags &&
-				( (tcp && d->seq [0] == TCP_DEST_PORT(tcp)) ||
-					(udp && d->seq [0] == UDP_DEST_PORT(udp))))
+		{
+
+			dflags = d->seq[0].flags != 0 ? d->seq[0].flags : d->flags;
+
+			if ( dflags == flags &&
+				( (tcp && d->seq[0].port == TCP_DEST_PORT(tcp)) ||
+					(udp && d->seq[0].port == UDP_DEST_PORT(udp))))
 			{
 				found++;
 				break;
 			}
+		}
 
 		if ( !found )
 			return;
@@ -833,9 +919,11 @@ static void sniff(u_char *user, const struct pcap_pkthdr *hdr, const u_char *byt
 
 	/* Update the entry on success and execute it if the sequence is completed
 	 */
-	if ( (tcp && t->d->seq [t->seqcount] != TCP_DEST_PORT(tcp)) ||
-		(udp && t->d->seq [t->seqcount] != UDP_DEST_PORT(udp)) ||
-		t->d->flags != flags )
+	dflags = t->d->seq[t->seqcount].flags != 0 ? t->d->seq[t->seqcount].flags : t->d->flags;
+
+	if ( (tcp && t->d->seq[t->seqcount].port != TCP_DEST_PORT(tcp)) ||
+		(udp && t->d->seq[t->seqcount].port != UDP_DEST_PORT(udp)) ||
+		dflags != flags )
 		return;
 
 	if ( ++t->seqcount == t->d->seqcount )
@@ -848,6 +936,7 @@ static void sniff(u_char *user, const struct pcap_pkthdr *hdr, const u_char *byt
 static int sanity_check(void)
 {
 	struct door		*d;
+	size_t			i;
 
 	list_for_each_entry(d, &doors, list)
 	{
@@ -860,6 +949,15 @@ static int sanity_check(void)
 					d->name);
 			return -1;
 		}
+
+		for ( i = 0 ; i < d->seqcount ; i++ )
+			if ( (d->seq[i].flags & FLAG_UDP) != 0 &&
+				(d->seq[i].flags & ~FLAG_UDP) != 0 )
+			{
+				fprintf(stderr, "Section %s cannot be TCP and UDP on the same port (eg: %u).\n",
+						d->name, d->seq[i].port);
+				return -1;
+			}
 	}
 
 	return 0;
