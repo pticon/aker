@@ -47,6 +47,7 @@
 #include <errno.h>
 #include <limits.h>
 
+#include "compat.h"
 #include "list.h"
 
 #define PROGNAME	"aker"
@@ -526,25 +527,33 @@ static int flags_are_global(const struct door *d)
 	return 1;
 }
 
-static void flagsncat(const unsigned flags, char *buf, size_t n)
+static int flagsncat(const unsigned flags, char *buf, size_t n)
 {
 	if ( flags & FLAG_SYN )
-		strncat(buf, " and tcp[tcpflags] & tcp-syn != 0", n);
+		if ( strlcat(buf, " and tcp[tcpflags] & tcp-syn != 0", n) >= n )
+			return -1;
 
 	if ( flags & FLAG_RST )
-		strncat(buf, " and tcp[tcpflags] & tcp-rst != 0", n);
+		if ( strlcat(buf, " and tcp[tcpflags] & tcp-rst != 0", n) >= n )
+			return -1;
 
 	if ( flags & FLAG_FIN )
-		strncat(buf, " and tcp[tcpflags] & tcp-fin != 0", n);
+		if ( strlcat(buf, " and tcp[tcpflags] & tcp-fin != 0", n) >= n )
+			return -1;
 
 	if ( flags & FLAG_ACK )
-		strncat(buf, " and tcp[tcpflags] & tcp-ack != 0", n);
+		if ( strlcat(buf, " and tcp[tcpflags] & tcp-ack != 0", n) >= n )
+			return -1;
 
 	if ( flags & FLAG_PSH )
-		strncat(buf, " and tcp[tcpflags] & tcp-push != 0", n);
+		if ( strlcat(buf, " and tcp[tcpflags] & tcp-push != 0", n) >= n )
+			return -1;
 
 	if ( flags & FLAG_URG )
-		strncat(buf, " and tcp[tcpflags] & tcp-urg != 0", n);
+		if ( strlcat(buf, " and tcp[tcpflags] & tcp-urg != 0", n) >= n )
+			return -1;
+
+	return 0;
 }
 
 static int gen_pcap_filter(void)
@@ -564,13 +573,17 @@ static int gen_pcap_filter(void)
 		int	global_flags = flags_are_global(d);
 		int	prev = 0;
 
-		strncat(d->pcap_exp, "(", sizeof(d->pcap_exp));
+		if ( strlcat(d->pcap_exp, "(", sizeof(d->pcap_exp)) >= sizeof(d->pcap_exp) )
+			return -1;
 
 		if ( strlen(ipaddr) )
 		{
-			strncat(d->pcap_exp, "(dst host ", sizeof(d->pcap_exp));
-			strncat(d->pcap_exp, ipaddr, sizeof(d->pcap_exp));
-			strncat(d->pcap_exp, ")", sizeof(d->pcap_exp));
+			if ( strlcat(d->pcap_exp, "(dst host ", sizeof(d->pcap_exp)) >= sizeof(d->pcap_exp) )
+				return -1;
+			if ( strlcat(d->pcap_exp, ipaddr, sizeof(d->pcap_exp)) >= sizeof(d->pcap_exp) )
+				return -1;
+			if ( strlcat(d->pcap_exp, ")", sizeof(d->pcap_exp)) >= sizeof(d->pcap_exp) )
+				return -1;
 			prev = 1;
 		}
 
@@ -579,44 +592,59 @@ static int gen_pcap_filter(void)
 			int	set = 0;
 
 			if ( prev )
-				strncat(d->pcap_exp, " and (", sizeof(d->pcap_exp));
+				if ( strlcat(d->pcap_exp, " and (", sizeof(d->pcap_exp)) >= sizeof(d->pcap_exp) )
+					return -1;
 
 			for ( i = 0 ; i < d->seqcount ; i++ )
 			{
 				if ( set++ )
-					strncat(d->pcap_exp, " or ", sizeof(d->pcap_exp));
+					if ( strlcat(d->pcap_exp, " or ", sizeof(d->pcap_exp)) >= sizeof(d->pcap_exp) )
+						return -1;
 
 				flags = d->seq[i].flags != 0 ? d->seq[i].flags : d->flags;
 
 				if ( (flags & ~FLAG_UDP) && !global_flags )
-					strncat(d->pcap_exp, "( ", sizeof(d->pcap_exp));
+					if ( strlcat(d->pcap_exp, "( ", sizeof(d->pcap_exp)) >= sizeof(d->pcap_exp) )
+						return -1;
 
 
 				if ( (flags & FLAG_UDP) != 0 )
-					strncat(d->pcap_exp, "udp dst port ", sizeof(d->pcap_exp));
+				{
+					if ( strlcat(d->pcap_exp, "udp dst port ", sizeof(d->pcap_exp)) >= sizeof(d->pcap_exp) )
+						return -1;
+				}
 				else
-					strncat(d->pcap_exp, "tcp dst port ", sizeof(d->pcap_exp));
+				{
+					if ( strlcat(d->pcap_exp, "tcp dst port ", sizeof(d->pcap_exp)) >= sizeof(d->pcap_exp) )
+						return -1;
+				}
 
 				snprintf(buf, sizeof(buf), "%d", d->seq[i].port);
-				strncat(d->pcap_exp, buf, sizeof(d->pcap_exp));
+				if ( strlcat(d->pcap_exp, buf, sizeof(d->pcap_exp)) >= sizeof(d->pcap_exp) )
+					return -1;
 
 				if ( (flags & ~FLAG_UDP) && !global_flags )
 				{
-					flagsncat(flags, d->pcap_exp, sizeof(d->pcap_exp));
-					strncat(d->pcap_exp, " )", sizeof(d->pcap_exp));
+					if ( flagsncat(flags, d->pcap_exp, sizeof(d->pcap_exp)) )
+						return -1;
+					if ( strlcat(d->pcap_exp, " )", sizeof(d->pcap_exp)) >= sizeof(d->pcap_exp) )
+						return -1;
 				}
 			}
 
 			if ( prev )
-				strncat(d->pcap_exp, ")", sizeof(d->pcap_exp));
+				if ( strlcat(d->pcap_exp, ")", sizeof(d->pcap_exp)) >= sizeof(d->pcap_exp) )
+					return -1;
 
 			prev = 1;
 		}
 
 		if ( global_flags )
-			flagsncat(d->flags, d->pcap_exp, sizeof(d->pcap_exp));
+			if ( flagsncat(d->flags, d->pcap_exp, sizeof(d->pcap_exp)) )
+				return -1;
 
-		strncat(d->pcap_exp, ")", sizeof(d->pcap_exp));
+		if ( strlcat(d->pcap_exp, ")", sizeof(d->pcap_exp)) >= sizeof(d->pcap_exp) )
+			return -1;
 	}
 
 	/* Append all of the subfilters in one filter
@@ -626,8 +654,10 @@ static int gen_pcap_filter(void)
 	list_for_each_entry(d, &doors, list)
 	{
 		if ( prev++ )
-			strncat(filter, " and ", sizeof(filter) - strlen(filter) - 1);
-		strncat(filter, d->pcap_exp, sizeof(filter) - strlen(filter) - 1);
+			if ( strlcat(filter, " and ", sizeof(filter)) >= sizeof(d->pcap_exp) )
+				return -1;
+		if ( strlcat(filter, d->pcap_exp, sizeof(filter)) >= sizeof(d->pcap_exp) )
+			return -1;
 	}
 	printf("%s\n", filter);
 
