@@ -1,0 +1,76 @@
+.\"/* Copyright © 2017,2018 by Pierre Lebleu (pticon)
+.\" * All rights reserved
+.\"
+.\" * aker is licensed under the BSD 3-clause "New" or "Revised" License.
+.\" *
+.\" * Send bug reports, bug fixes, enhancements, requests, flames, etc., and
+.\" * I'll try to keep a version up to date.  I can be reached as follows:
+.\" * Pierre Lebleu (pticon)                          <pme.lebleu@gmail.com>
+.\" */
+.TH AKER 8
+.
+.SH "NAME"
+.
+.B aker
+- A port knocking daemon
+.
+.SH "SYNOPSIS"
+.
+.SY "aker"
+.I
+.RI [ option ]
+.YS
+.
+.SH "DESCRIPTION"
+.I aker
+is a port knocking daemon.
+.P
+It gives you the ability to execute a command triggered by at least one port combination.
+.P
+Generally, we can use it to hide a management port like SSH and execute the given
+.I firewall
+rule to allow this client.
+.P
+It runs as a daemon, and is listening to right port sequence in order to execute the given command.
+.
+.SH "COMMANDS"
+.
+.TP
+.B "\-h"
+Prints usage information and a short summary of the available commands.
+.TP
+.B "\-c <config>"
+Use this configuration file (see
+.IR aker.conf(8) ).
+The default value is set to @SYSCONFDIR@/aker.conf.
+.TP
+.B "\-f"
+Run in foreground, do not daemonize.
+.TP
+.B "\-t"
+Test the generated pcap filter and exit.
+.TP
+.B "\-v"
+Display version number and exit.
+.
+.SH "FILE"
+.
+The configuration file called
+.B aker.conf (8)
+is where all the directives take place.
+.
+.SH "SIGNAL"
+.I aker
+will reload the configuration file on the
+.B SIGHUP
+signal.
+.
+.SH "SEE ALSO"
+.
+aker.conf(8)
+.
+.SH "AUTHOR"
+.
+Pierre Lebleu (pticon) <pme.lebleu@gmail.com> is the author of
+.I aker
+and creator of this manual page.

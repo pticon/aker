@@ -1,5 +1,5 @@
 /*
- * Copyright © 2017, Pticon
+ * Copyright © 2017,2018 Pticon
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -29,7 +29,7 @@
  */
 #include <string.h>
 
-#ifndef __BSD_VISIBLE
+#ifndef HAVE_STRLCAT
 /*	$OpenBSD: strlcat.c,v 1.18 2016/10/16 17:37:39 dtucker Exp $	*/
 
 /*
@@ -55,7 +55,7 @@
  * Returns strlen(src) + MIN(dsize, strlen(initial dst)).
  * If retval >= dsize, truncation occurred.
  */
-size_t strlcat(char *dst, const char *src, size_t dsize)
+static inline size_t strlcat(char *dst, const char *src, size_t dsize)
 {
 	const char *odst = dst;
 	const char *osrc = src;
@@ -86,4 +86,4 @@ size_t strlcat(char *dst, const char *src, size_t dsize)
 
 	return(dlen + (src - osrc));	/* count does not include NUL */
 }
-#endif /* ! __BSD_VISIBLE */
+#endif /* ! HAVE_STRLCAT */

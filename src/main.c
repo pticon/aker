@@ -1,5 +1,5 @@
 /*
- * Copyright © 2017, Pticon
+ * Copyright © 2017,2018 Pticon
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -39,7 +39,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
-#include <netinet/if_ether.h>
+#include <net/ethernet.h>
 #include <netinet/ip.h>
 #include <netinet/tcp.h>
 #include <netinet/udp.h>
@@ -47,15 +47,14 @@
 #include <errno.h>
 #include <limits.h>
 
+#include "config.h"
 #include "compat.h"
 #include "list.h"
 
-#define PROGNAME	"aker"
 #ifndef PATH_MAX
 # define PATH_MAX	4096
 #endif /* PATH_MAX */
-#define VERSION		"1.0"
-#define DEFAULT_CONF	"/usr/local/etc/aker.conf"
+#define DEFAULT_CONF	SYSCONFDIR"/"PACKAGE".conf"
 #define SEQUENCE_MAX	32
 #define DEFAULT_TIMEOUT	5
 #define PCAP_EXP_LEN	(SEQUENCE_MAX * 100)
@@ -121,14 +120,10 @@ typedef enum
 # define ATTR_PRINTF(_a, _b)
 #endif /* __GNUC__ */
 
-#ifdef __FreeBSD__
-static char	interface [PATH_MAX] = "em0";
-#else
-static char	interface [PATH_MAX] = "eth0";
-#endif /* __FreeBSD__ */
-static char	logfile [PATH_MAX] = "/var/log/"PROGNAME".log";
+static char	interface [PATH_MAX] = DEFAULT_INTERFACE;
+static char	logfile [PATH_MAX] = PREFIX"/var/log/"PACKAGE".log";
 static FILE	*flog = NULL;
-static char	pidfile [PATH_MAX] = "/var/run/"PROGNAME".pid";
+static char	pidfile [PATH_MAX] = PREFIX"/var/run/"PACKAGE".pid";
 static char	startcmd [PATH_MAX] = "";
 static char	stopcmd [PATH_MAX] = "";
 static char	ipaddr [NI_MAXHOST] = "";
@@ -141,7 +136,7 @@ static status_t	status = DAEMON_RUN;
 
 static void usage(void)
 {
-	printf("usage: %s [options]\n", PROGNAME);
+	printf("usage: %s [options]\n", PACKAGE);
 	printf("options:\n");
 	printf("\t-c <conffile> : default is %s\n", DEFAULT_CONF);
 	printf("\t-f            : run in foreground (do not fork)\n");
@@ -152,7 +147,7 @@ static void usage(void)
 
 static void version(void)
 {
-	printf("%s v%s\n", PROGNAME, VERSION);
+	printf("%s v%s\n", PACKAGE, VERSION);
 }
 
 static void logger(const char *fmt, ...) ATTR_PRINTF(1, 2);
@@ -832,14 +827,16 @@ static unsigned get_tcp_flags(const struct tcphdr *tcp)
 	if ( tcp->th_flags & TH_ACK ) flags |= FLAG_ACK;
 	if ( tcp->th_flags & TH_PUSH ) flags |= FLAG_PSH;
 	if ( tcp->th_flags & TH_URG ) flags |= FLAG_URG;
-#else
+#elif __LINUX__
 	if ( tcp->syn ) flags |= FLAG_SYN;
 	if ( tcp->rst ) flags |= FLAG_RST;
 	if ( tcp->fin ) flags |= FLAG_FIN;
 	if ( tcp->ack ) flags |= FLAG_ACK;
 	if ( tcp->psh ) flags |= FLAG_PSH;
 	if ( tcp->urg ) flags |= FLAG_URG;
-#endif /* __FreeBSD__ */
+#else
+# error "Unknown machine type (Not FreeBSD nor Linux)."
+#endif /* __FreeBSD__ || __LINUX__ */
 
 	return flags;
 }

@@ -1,0 +1,167 @@
+.\"/* Copyright © 2017,2018 by Pierre Lebleu (pticon)
+.\" * All rights reserved
+.\"
+.\" * aker is licensed under the BSD 3-clause "New" or "Revised" License.
+.\" *
+.\" * Send bug reports, bug fixes, enhancements, requests, flames, etc., and
+.\" * I'll try to keep a version up to date.  I can be reached as follows:
+.\" * Pierre Lebleu (pticon)                          <pme.lebleu@gmail.com>
+.\" */
+.TH aker.conf 8
+.
+.SH "NAME"
+.
+.B aker.conf
+- aker configuration file
+.
+.SH "DESCRIPTION"
+The 
+.I aker.conf
+file contains configuration information for aker, the port knocking daemon.
+.P
+The aker.conf file is a free-form ASCII text file. The file may contain extra tabs and newlines for formatting purposes.
+.P
+Keywords in the file are case-insensitive. Comments may be placed at the begining of each line within the file.
+.P
+Comments begin with the
+.I #
+or
+.I ;
+character.
+.P
+Each section has some key value pair separated by the
+.I =
+character.
+.
+.SH "EXAMPLES"
+A typical
+.I aker.conf
+file will look something like this:
+
+.
+# General options
+.P
+[
+.I options
+]
+        pidfile = /var/run/aker.pid
+        logfile = /var/log/aker.log
+        ipaddr = 192.168.1.1
+        interface = eth0
+        startcmd = /sbin/iptables -A INPUT -p tcp --dport 22 -j DROP -m comment --comment "aker: startcmd"
+        stopcmd = /sbin/iptables -D INPUT -p tcp --dport 22 -j DROP
+
+# Open the SSH port directive
+.P
+[
+.I openssh
+]
+        sequence = 12345,23456,34567
+        timeout = 5
+        command = /sbin/iptables -I INPUT -s %IP% -p tcp --dport 22 -j ACCEPT -m comment --comment "aker: openssh"
+        flags = syn
+
+# Close the SSH port directive
+.P
+[
+.I closessh
+]
+        sequence = 34567,23456,12345
+        timeout = 5
+        command = /sbin/iptables -D INPUT -s %IP% -p tcp --dport 22 -j ACCEPT
+        flags = syn
+.P
+Notice that at the beginning of the file in the
+.I [options]
+section, there's a place for global parameters. This section is not mandatory. If not present, default valures are taken.
+.P
+Then, each other section is a directive representing a port knocking sequence.
+.
+.SH "OPTIONS"
+.
+The
+.I options
+section is optional but here you can tweak some options.
+
+Here are the keys you can set:
+
+.I pidfile
+The filename where the daemon writes its own
+.BR PID .
+The default value is @PREFIX@/var/run/aker.pid.
+
+.I logfile
+The filename where the daemon provides
+.BR logs .
+The default value is @PREFIX@/var/log/aker.log.
+
+.I ipaddr
+The IP address where the daemon listens to.
+
+.I interface
+The network interface where the daemon listens to.
+
+.I startcmd
+The shell command to excecute when the daemon starts.
+
+.I stopcmd
+The shell command to excecute when the daemon stops.
+
+.
+.SH "DIRECTIVE"
+A directive describes the sequence to achieve in order to execute the given action.
+
+The directive
+.B MUST
+have a name and its name is up to you.
+
+Here are the keys you can set:
+
+.I sequence
+The port sequence number comma separated. Of course, each port must be positive, lower than 65535 and expressed in base 10. The maximum ports sequence is set to 32. Moreover, you can directly specify the flags within each sequence number with the
+.I :
+character. The valid flags are
+.I syn rst fin ack urg
+and
+.I udp
+and they
+.B MUST
+be separated by the
+.I /
+character. For example, you can write:
+.IR 1:syn,2:syn/ack,3:udp .
+The sequence number written without flags inherits the flags within its directive.
+
+.I timeout
+The time within the port knocking should be performed. The timeout is expressed in seconds. If this parameter is omitted, an arbitrary value is set 5 seconds. You probably should decrease this value to 1 or 2 seconds for more security concern.
+
+.I command
+The shell command to execute when the sequence is completed.
+The special
+.B %IP%
+variable represents the source IP where the port knocking was performed.
+
+.I flags
+This value is set for all of the sequence port without flags specified. The valid flags are
+.I syn rst fin ack urg
+and
+.I udp
+and they
+.B MUST
+be separated by the
+.I ,
+character.
+
+.
+.SH "SEE ALSO"
+.
+.BR aker (8)
+.
+.SH "AUTHOR"
+.
+Pierre Lebleu (pticon) <pme.lebleu@gmail.com> is the author of
+.I aker
+and creator of this manual page.
+.
+.SH "COPYRIGHT"
+Copyright © 2017,2018 Pticon. Licensed under the BSD 3-clause "New" or "Revised" License.

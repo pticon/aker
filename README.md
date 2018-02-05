@@ -5,17 +5,27 @@ Generally, we can use it to hide a management port like SSH and execute the give
 Aker was also an Ancient Egyptian earth and death deity and was described as one of the earth gods guarding the "gate to the yonder site". For more info, please check [wikipedia](https://en.wikipedia.org/wiki/Aker_(deity)).
 
 ## Prerequisites
-You have to install the *libpcap*, the *GNU make*, and a C compiler (clang, gcc, etc...).
+You have to install the *libpcap*, *make*, and a working C compiler (clang, gcc, etc...).
 
 ## Build
-On Linux:
+Generate the configure script:
+```
+./bootstrap.sh
+```
+
+Generate the Makefile:
+```
+./configure
+```
+
+Compile the source:
 ```
 make
 ```
 
-On FreeBSD:
+Clean everything:
 ```
-gmake CC=clang LD=clang
+./clean.sh
 ```
 
 ## Running the tests
@@ -32,11 +42,7 @@ Options:
                         execute the group test
 ```
 
-Or you could also just run:
-```
-(g)make test
-```
-There is some issues for the live tests with FreeBSD because we cannot create socket with the **AF_PACKET** type. Any help would be appreciate !
+There is some issues for the live tests with FreeBSD because we cannot create socket with the **AF_PACKET** type. Any help would be appreciated !
 
 ## Install
 Just run:

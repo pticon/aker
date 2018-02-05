@@ -1,5 +1,5 @@
 /*
- * Copyright © 2017, Pticon
+ * Copyright © 2017,2018 Pticon
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without

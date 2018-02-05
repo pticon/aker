@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Copyright 2017, Pticon
+# Copyright 2017,2018 Pticon
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -49,8 +49,8 @@ import signal
 import platform
 
 
-PROGNAME="./aker"
-TEST_DIR="./test/"
+PROGNAME="../src/aker"
+TEST_DIR="./"
 CONF_DIR=TEST_DIR + "confs/"
 RESULT_DIR=TEST_DIR + "results/"
 
