@@ -42,7 +42,7 @@ all: $(TARGET)
 
 $(TARGET): $(OBJS)
 	$(call echo-cmd, "  LD   $@")
-	$(Q)$(LD) $(LDFLAGS) -o $@ $^
+	$(Q)$(LD) -o $@ $^ $(LDFLAGS)
 
 
 %.o: %.c
