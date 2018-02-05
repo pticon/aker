@@ -728,6 +728,15 @@ static int setup_signals(void)
 }
 
 
+static void exec_cmd(const char *cmd)
+{
+	int ret = system(cmd);
+
+	if ( ret )
+		logger("%s: %d", cmd, ret);
+}
+
+
 static void exec_door(const struct door *d, unsigned ip)
 {
 	char	cmd [PATH_MAX];
@@ -746,7 +755,7 @@ static void exec_door(const struct door *d, unsigned ip)
 	}
 
 	logger("%s: execute command for " FMT_IPADDR ": %s", d->name, IPADDR(ip), cmd);
-	system(cmd);
+	exec_cmd(cmd);
 }
 
 
@@ -1094,7 +1103,7 @@ reload:
 	/* Execute the startcmd if any
 	 */
 	if ( strlen(startcmd) )
-		system(startcmd);
+		exec_cmd(startcmd);
 
 	if ( test )
 	{
@@ -1166,7 +1175,7 @@ error:
 	/* Cleanup
 	 */
 	if ( strlen(stopcmd) )
-		system(stopcmd);
+		exec_cmd(stopcmd);
 
 	if ( pcap )
 		pcap_close(pcap);
